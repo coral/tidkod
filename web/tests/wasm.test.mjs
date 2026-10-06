@@ -360,3 +360,35 @@ test('recording UUID updates without resetting timing and remains in frozen/hold
     assert.throws(() => f.snapshot(withId(3, [1, 2]), now + 10000), /session ID/);
   } finally { frozen?.free(); f.free(); }
 });
+
+test('LTC reusable samples, exact metadata, tracking and snapshot output', async () => {
+  const {LtcEncoder,LtcDecoder,LtcInput,LtcOutput,LtcSampleBuffer,ltc_memory}=await import('../pkg-node/tidkod_wasm.js');
+  const buffer=new LtcSampleBuffer(48000);
+  const encoder=new LtcEncoder(30000,1001,true,48000,1797n);
+  const decoder=new LtcDecoder(30000,1001,true,48000);
+  const input=new LtcInput(30000,1001,true,48000);
+  const output=new LtcOutput(30000,1001,true,48000);
+  let snapshot;
+  try {
+    encoder.set_metadata(0x87654321,5,true);
+    assert.equal(encoder.render(buffer,48000),2);
+    const samples=new Float32Array(ltc_memory().buffer,buffer.pointer(),buffer.capacity());
+    assert.equal(Math.abs(samples[100]),0.5);
+    for (const reader of [decoder,input]) {
+      let offset=0,frames=0;
+      while(offset<48000) {
+        const used=reader.process(buffer,offset,48000-offset,BigInt(offset),1000000000n+BigInt(offset)*1000000000n/48000n);
+        assert.ok(used>0);offset+=used;
+        const result=reader.result();
+        if(result.has_frame){frames++;assert.equal(result.user_bits,0x87654321);assert.equal(result.binary_group_flags,5);assert.ok(result.polarity_valid);assert.ok(result.end_ns>result.start_ns);}
+        result.free();
+      }
+      assert.ok(frames>=25);
+    }
+    const reading=input.read(2000);assert.equal(reading.health,'Healthy');assert.ok(BigInt(reading.wholeFrames)>=1825n);
+    snapshot=input.capture_snapshot(2000);
+    assert.equal(output.render(snapshot,buffer,48000,48000n,2000000000n),2);
+    assert.equal(decoder.process(buffer,48001,1,0n,0n),0);assert.equal(decoder.state(),5);
+    assert.throws(()=>new LtcEncoder(60,1,false,48000,0n));
+  } finally {snapshot?.free();output.free();input.free();decoder.free();encoder.free();buffer.free();}
+});

@@ -8,6 +8,9 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 subprocess.run(["cargo", "build", "-p", "tidkod", "--examples", "--locked"], cwd=ROOT, check=True)
 BIN = ROOT / "target" / "debug" / "examples"
+# Device-independent smoke: CI has no capture/playback device.
+for name in ["ltc_in", "ltc_out"]:
+    subprocess.run([str(BIN / name), "--help"], check=True, timeout=10)
 with tempfile.TemporaryFile(mode="w+") as log:
     leader = subprocess.Popen([str(BIN / "leader"), "--bind", "127.0.0.1:0", "--no-mdns", "--seconds", "4"], stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, text=True)
     try:

@@ -105,7 +105,7 @@ fn main() {
             _ => {}
         }
     }
-    let primitive = ["()", "bool", "u8", "u32", "u64", "i32", "i64", "f64"];
+    let primitive = ["()", "bool", "u8", "u32", "u64", "i32", "i64", "f32", "f64"];
     let valid = |t: &str| {
         primitive.contains(&t)
             || records.contains_key(t)
@@ -124,7 +124,7 @@ fn main() {
         for (_, t) in args(f) {
             assert!(
                 (primitive.contains(&t.as_str()) && t != "()")
-                    || matches!(t.as_str(), "&str" | "&[u8]")
+                    || matches!(t.as_str(), "&str" | "&[u8]" | "&[f32]" | "&mut[f32]")
                     || (t.starts_with('&')
                         && opaque.contains(t.trim_start_matches('&').trim_start_matches("mut"))),
                 "unsupported argument {t}"
@@ -181,6 +181,12 @@ fn main() {
             let decl = a
                 .iter()
                 .map(|(n, t)| {
+                    if t == "&[f32]" || t == "&mut[f32]" {
+                        return format!(
+                            "{n}:*{} f32,{n}_len:usize",
+                            if t == "&[f32]" { "const" } else { "mut" }
+                        );
+                    }
                     format!(
                         "{n}:{}",
                         if t == "&str" {
@@ -227,7 +233,20 @@ fn main() {
             } else {
                 call
             };
-            body += &format!("fn {name}({decl})->{ret}{{{expr}}}\n");
+            let mut init = String::new();
+            for (n, t) in &a {
+                if t == "&[f32]" || t == "&mut[f32]" {
+                    let (borrow, from) = if t == "&[f32]" {
+                        ("&", "from_raw_parts")
+                    } else {
+                        ("&mut ", "from_raw_parts_mut")
+                    };
+                    init += &format!(
+                        "let {n}=if {n}_len==0 {{{borrow}[]}} else {{unsafe{{std::slice::{from}({n},{n}_len)}}}};"
+                    );
+                }
+            }
+            body += &format!("fn {name}({decl})->{ret}{{{init}{expr}}}\n");
         }
         bridge += "}}\n";
         let file = out.join("swift.rs");
@@ -265,6 +284,20 @@ fn main() {
                             "let {n}=std::str::from_utf8({n}).map_err(|e|e.to_string())?;"
                         );
                     }
+                } else if t == "&[f32]" || t == "&mut[f32]" {
+                    let mutable = t == "&mut[f32]";
+                    decl.push(format!(
+                        "{n}:*{} f32,{n}_len:usize",
+                        if mutable { "mut" } else { "const" }
+                    ));
+                    init += &format!(
+                        "let {n}=unsafe{{{}({n},{n}_len)}}?;",
+                        if mutable {
+                            "float_output"
+                        } else {
+                            "float_input"
+                        }
+                    );
                 } else if t.starts_with('&') {
                     let mutable = t.starts_with("&mut");
                     let ty = t.trim_start_matches('&').trim_start_matches("mut");

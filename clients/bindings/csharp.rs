@@ -40,9 +40,12 @@ fn ty(s: &str) -> String {
         "u64" => "ulong",
         "i32" => "int",
         "i64" => "long",
+        "f32" => "float",
         "f64" => "double",
         "&str" | "String" => "string",
         "&[u8]" => "ReadOnlySpan<byte>",
+        "&[f32]" => "ReadOnlySpan<float>",
+        "&mut[f32]" => "Span<float>",
         "Vec<u8>" => "byte[]",
         _ => base(s),
     }
@@ -147,6 +150,10 @@ pub fn generate(
                     }
                     s += &format!("using var lease_{n} = new HandleLease({handle});\n");
                     call.push(format!("(Sys.{}*)lease_{n}.Pointer", base(t)));
+                } else if t == "&[f32]" || t == "&mut[f32]" {
+                    pinned.push(format!("fixed(float* ptr_{n}=@{n})"));
+                    call.push(format!("ptr_{n}"));
+                    call.push(format!("(nuint)@{n}.Length"));
                 } else if t == "&str" || t == "&[u8]" {
                     let buffer = if t == "&str" {
                         s += &format!(

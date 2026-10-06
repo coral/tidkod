@@ -21,6 +21,9 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Install example audio headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@1.98.1
       - uses: actions/setup-python@v7.0.0
         with:
@@ -39,6 +42,8 @@ jobs:
         run: cargo test --workspace --locked
       - name: Build and exercise archived SDK
         run: python scripts/sdk.py build --target ${{ matrix.platform.target }} --variant ${{ matrix.variant }}
+      - name: Check audio-free SDK runtime dependencies
+        run: python scripts/check_ltc_dependencies.py --target ${{ matrix.platform.target }}
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: sdk-${{ matrix.platform.target }}-${{ matrix.variant }}

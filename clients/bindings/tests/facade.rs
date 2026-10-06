@@ -90,6 +90,59 @@ unsafe impl GlobalAlloc for Alloc {
 #[global_allocator]
 static ALLOC: Alloc = Alloc;
 #[test]
+fn ltc_processing_and_recovery_do_not_allocate() {
+    let mut encoder = ltc_encoder_new(30000, 1001, true, 48000, 1797).unwrap();
+    let mut decoder = ltc_decoder_new(30000, 1001, true, 48000).unwrap();
+    let mut input = ltc_input_new(30000, 1001, true, 48000).unwrap();
+    let mut output = ltc_output_new(30000, 1001, true, 48000).unwrap();
+    let mut snapshot = timecode_snapshot_new();
+    let mut samples = [0.; 512];
+    let mut rendered = [0.; 512];
+    let mut found = 0;
+    COUNT.with(|c| c.set(0));
+    ENABLED.with(|c| c.set(true));
+    for block in 0..200u64 {
+        assert_eq!(ltc_encoder_render(&mut encoder, &mut samples), 2);
+        if block == 100 {
+            samples[17] = f32::NAN;
+            ltc_decoder_reset(&mut decoder);
+        }
+        for tracked in [false, true] {
+            let mut at = 0;
+            while at < samples.len() {
+                let index = block * 512 + at as u64;
+                let ns = 1_000_000_000 + index * 1_000_000_000 / 48000;
+                let r = if tracked {
+                    ltc_input_process(&mut input, &samples[at..], index, ns)
+                } else {
+                    ltc_decoder_process(&mut decoder, &samples[at..], index, ns)
+                };
+                assert!(r.consumed > 0);
+                at += r.consumed as usize;
+                found += usize::from(r.has_frame);
+            }
+        }
+        ltc_input_capture_into(
+            &input,
+            &mut snapshot,
+            1_000_000_000 + block * 512 * 1_000_000_000 / 48000,
+        );
+        ltc_output_render(
+            &mut output,
+            &snapshot,
+            &mut rendered,
+            block * 512,
+            1_000_000_000 + block * 512 * 1_000_000_000 / 48000,
+        );
+    }
+    ltc_input_reset(&mut input, 0);
+    ltc_output_reset(&mut output);
+    ltc_encoder_reset(&mut encoder, 0);
+    ENABLED.with(|c| c.set(false));
+    assert!(found > 80);
+    assert_eq!(COUNT.with(Cell::get), 0);
+}
+#[test]
 fn exact_large_position_and_allocation_free_portable_reads() {
     let core = core_configured(i64::MAX - 7, u32::MAX, 30, 1, false, 0.03, 1., 3).unwrap();
     let value = core_read(&core, 0);

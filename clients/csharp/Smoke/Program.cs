@@ -119,3 +119,17 @@ Console.WriteLine("C# wrappers passed");
 [MethodImpl(MethodImplOptions.NoInlining)]
 static void AbandonReader(Leader leader) { var reader = leader.Reader(); reader.Read(); }
 #endif
+
+using (var ltcEncoder = new LtcEncoder(25, 1, false, 48000, 90))
+using (var ltcDecoder = new LtcDecoder(25, 1, false, 48000)) {
+    var pcm = new float[8000];
+    Check(ltcEncoder.Render(pcm) == 2, "LTC render");
+    int offset = 0, frames = 0;
+    while (offset < pcm.Length) {
+        var result = ltcDecoder.Process(pcm.AsSpan(offset), (ulong)offset, 1000000000UL + (ulong)offset * 1000000000UL / 48000);
+        Check(result.Consumed > 0, "LTC progress"); offset += (int)result.Consumed;
+        if (result.HasFrame) { frames++; Check(result.Frames >= 90, "LTC label"); }
+    }
+    Check(frames >= 3, "LTC frames");
+    Check(ltcEncoder.Render(Span<float>.Empty) == 2, "LTC empty output");
+}

@@ -9,6 +9,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Install example audio headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libltc-dev
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: rustfmt,clippy
@@ -18,6 +21,13 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      - run: cargo test -p tidkod --example ltc_in --locked
+      - run: python scripts/check_ltc_dependencies.py
+      - name: Independent LTC interoperability (test executable only)
+        run: |
+          cargo build -p tidkod-bindings --locked
+          cc -O2 -DNDEBUG -I target/debug/tidkod-generated/native scripts/ltc_reference.c -L target/debug -Wl,-rpath,"$PWD/target/debug" -ltidkod_bindings $(pkg-config --cflags --libs ltc) -o target/ltc-reference
+          target/ltc-reference
       - run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings

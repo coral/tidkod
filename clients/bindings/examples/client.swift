@@ -72,3 +72,23 @@ try engine.shutdown()
 precondition(snapshot.read(nowNs: 123).frames == -7)
 #endif
 print("Swift client passed")
+
+let ltcEncoder = try LtcEncoder(numerator: 25, denominator: 1, dropFrame: false, sampleRate: 48000, frames: 90)
+let ltcDecoder = try LtcDecoder(numerator: 25, denominator: 1, dropFrame: false, sampleRate: 48000)
+var pcm = [Float](repeating: 0, count: 8000)
+let ltcState = pcm.withUnsafeMutableBufferPointer { ltcEncoder.render(samples: $0) }
+precondition(ltcState == 2)
+var ltcOffset = 0
+var ltcFrames = 0
+pcm.withUnsafeBufferPointer { buffer in
+    while ltcOffset < buffer.count {
+        let samples = UnsafeBufferPointer(rebasing: buffer[ltcOffset...])
+        let result = ltcDecoder.process(samples: samples, firstSample: UInt64(ltcOffset), firstSampleNs: 1_000_000_000 + UInt64(ltcOffset) * 1_000_000_000 / 48000)
+        precondition(result.consumed > 0)
+        ltcOffset += Int(result.consumed)
+        if result.hasFrame { ltcFrames += 1; precondition(result.frames >= 90) }
+    }
+}
+precondition(ltcFrames >= 3)
+let emptyLtcState = ltcEncoder.render(samples: UnsafeMutableBufferPointer<Float>(start: nil, count: 0))
+precondition(emptyLtcState == 2)

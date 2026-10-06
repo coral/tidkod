@@ -88,6 +88,13 @@ def notices(sdk, target, variant):
             source_url = f'https://crates.io/api/v1/crates/{p["name"]}/{p["version"]}/download'
         inventory.append({"name": p["name"], "version": p["version"], "license": p["license"],
                           "source": source_url, "license_files": sorted(set(copied))})
+    # The LTC decoder is adapted source, not a Cargo registry dependency.
+    ltc_notice = sdk / "licenses" / "ltc-0.2.0-adapted" / "LICENSE.txt"
+    ltc_notice.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / "protocol/licenses/ltc-BSD-3-Clause.txt", ltc_notice)
+    inventory.append({"name": "ltc-adapted", "version": "0.2.0", "license": "BSD-3-Clause",
+                      "source": "https://crates.io/api/v1/crates/ltc/0.2.0/download",
+                      "license_files": [str(ltc_notice.relative_to(sdk))]})
     (sdk / "THIRD-PARTY.json").write_text(json.dumps(inventory, indent=2) + "\n")
     (sdk / "THIRD-PARTY.txt").write_text(
         "Dependency inventory includes native dependencies and build tools.\n"
@@ -95,7 +102,8 @@ def notices(sdk, target, variant):
         "Exact upstream source is available at the URLs in THIRD-PARTY.json.\n"
         "MPL-2.0-covered source, including triple_buffer, is available at its listed URL\n"
         "under MPL-2.0. No modifications to those dependencies are included.\n"
-        "Adapted MoQ transport source and attribution are included in source/native/.\n")
+        "Adapted MoQ transport source and attribution are included in source/native/.\n"
+        "Adapted BSD LTC decoder source and attribution are included in source/protocol/.\n")
 
 
 def archive(sdk, out, name, windows=False):

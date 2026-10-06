@@ -17,6 +17,7 @@
 //! # Ok::<(), tidkod_protocol::Error>(())
 //! ```
 pub mod boundary;
+pub mod ltc;
 pub use boundary::{Boundary, BoundaryKind};
 pub mod clock;
 pub mod output;

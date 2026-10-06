@@ -2,7 +2,27 @@
 #include "check.h"
 #include <stdio.h>
 #include <string.h>
+static void check_ltc(void) {
+    LtcEncoder *encoder = NULL; LtcDecoder *decoder = NULL; TKBuffer *error = NULL;
+    CHECK(tidkod_ltc_encoder_new(30000, 1001, true, 48000, 1797, &encoder, &error) == 0);
+    CHECK(tidkod_ltc_decoder_new(30000, 1001, true, 48000, &decoder, &error) == 0);
+    CHECK(tidkod_ltc_encoder_set_metadata(encoder, 0x87654321u, 5, true, &error) == 0);
+    float samples[8000]; uint8_t state = 0;
+    CHECK(tidkod_ltc_encoder_render(encoder, samples, 8000, &state, &error) == 0 && state == 2);
+    size_t offset = 0; unsigned frames = 0;
+    while (offset < 8000) {
+        LtcResult result;
+        CHECK(tidkod_ltc_decoder_process(decoder, samples + offset, 8000 - offset,
+            offset, 1000000000ULL + offset * 1000000000ULL / 48000, &result, &error) == 0);
+        CHECK(result.consumed > 0); offset += (size_t)result.consumed;
+        if (result.has_frame) { ++frames; CHECK(result.user_bits == 0x87654321u && result.polarity_valid); }
+    }
+    CHECK(frames >= 3);
+    CHECK(tidkod_ltc_encoder_render(encoder, NULL, 0, &state, &error) == 0);
+    tidkod_ltcencoder_free(encoder); tidkod_ltcdecoder_free(decoder);
+}
 int main(void) {
+    check_ltc();
     Core *core = NULL;
     TKBuffer *error = NULL;
     CHECK(tidkod_core_new(&core, &error) == 0);

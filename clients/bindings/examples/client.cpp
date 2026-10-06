@@ -3,6 +3,19 @@
 #include <iostream>
 int main() {
     namespace es = tidkod::client;
+    auto ltc_encoder = es::LtcEncoder::create(25, 1, false, 48000, 90);
+    auto ltc_decoder = es::LtcDecoder::create(25, 1, false, 48000);
+    CHECK(ltc_encoder && ltc_decoder);
+    float pcm[8000];
+    CHECK(ltc_encoder.value().render({pcm, 8000}) == 2);
+    size_t ltc_offset = 0; unsigned ltc_frames = 0;
+    while (ltc_offset < 8000) {
+        auto result = ltc_decoder.value().process({pcm + ltc_offset, 8000 - ltc_offset}, ltc_offset,
+            1000000000ULL + ltc_offset * 1000000000ULL / 48000);
+        CHECK(result.consumed > 0); ltc_offset += result.consumed;
+        if (result.has_frame) { ++ltc_frames; CHECK(result.frames >= 90); }
+    }
+    CHECK(ltc_frames >= 3);
     auto core = es::Core::create();
     CHECK(core.read(123).fps_numerator == 30);
     auto snapshot = es::TimecodeSnapshot::create();

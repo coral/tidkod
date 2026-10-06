@@ -26,6 +26,8 @@ pub fn generate(
 #include <utility>
 #include <cstdlib>
 namespace tidkod::client {
+struct FloatInput {const float* data; size_t size;};
+struct FloatOutput {float* data; size_t size;};
 template<class T> class Result {
     std::optional<T> value_; std::string error_;
     Result(std::string error, int): error_(std::move(error)) {}
@@ -75,6 +77,8 @@ struct Buffer {
         "&str" => "std::string_view".into(),
         "Vec<u8>" => "std::vector<uint8_t>".into(),
         "&[u8]" => "const std::vector<uint8_t>&".into(),
+        "&[f32]" => "FloatInput".into(),
+        "&mut[f32]" => "FloatOutput".into(),
         _ if t.starts_with('&') => format!(
             "{}{}&",
             if t.starts_with("&mut") { "" } else { "const " },
@@ -148,6 +152,8 @@ public:
                     format!("{n}.raw()")
                 } else if t == "&str" {
                     format!("reinterpret_cast<const uint8_t*>({n}.data()), {n}.size()")
+                } else if t == "&[f32]" || t == "&mut[f32]" {
+                    format!("{n}.data, {n}.size")
                 } else if t == "&[u8]" {
                     format!("{n}.data(), {n}.size()")
                 } else {

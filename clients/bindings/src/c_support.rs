@@ -34,6 +34,32 @@ pub(crate) unsafe fn input<'a>(data: *const u8, len: usize) -> Result<&'a [u8], 
     }
     Ok(unsafe { std::slice::from_raw_parts(data, len) })
 }
+fn float_span(data: *const f32, len: usize) -> Result<(), String> {
+    if len > isize::MAX as usize / size_of::<f32>()
+        || (len != 0 && (data.is_null() || !data.is_aligned()))
+    {
+        return Err("invalid float span".into());
+    }
+    Ok(())
+}
+// Caller owns the live allocation for the complete call. Output spans require
+// exclusive access and must not alias handles, input spans, or result storage.
+pub(crate) unsafe fn float_input<'a>(data: *const f32, len: usize) -> Result<&'a [f32], String> {
+    float_span(data, len)?;
+    if len == 0 {
+        Ok(&[])
+    } else {
+        Ok(unsafe { std::slice::from_raw_parts(data, len) })
+    }
+}
+pub(crate) unsafe fn float_output<'a>(data: *mut f32, len: usize) -> Result<&'a mut [f32], String> {
+    float_span(data, len)?;
+    if len == 0 {
+        Ok(&mut [])
+    } else {
+        Ok(unsafe { std::slice::from_raw_parts_mut(data, len) })
+    }
+}
 pub(crate) unsafe fn invoke(
     error: *mut *mut TKBuffer,
     f: impl FnOnce() -> Result<(), String>,

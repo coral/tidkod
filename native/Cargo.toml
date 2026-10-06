@@ -42,8 +42,16 @@ path = "examples/tracked.rs"
 [[example]]
 name = "accuracy"
 path = "examples/accuracy.rs"
+[[example]]
+name = "ltc_in"
+path = "examples/ltc_in.rs"
+[[example]]
+name = "ltc_out"
+path = "examples/ltc_out.rs"
 
 [dev-dependencies]
+cpal = "0.18.2"
+rtrb = "0.3.2"
 moq-net = "0.2.22"
 moq-native = { version = "0.19.19", default-features = false, features = ["quinn", "ring"] }
 tokio = { version = "1.53.1", features = ["rt", "sync", "time", "macros", "net"] }

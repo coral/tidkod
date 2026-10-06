@@ -1253,3 +1253,245 @@ pub fn follower_options_resolved(
         inner: tidkod::FollowerConfig::discovered(&discovered, address).map_err(error)?,
     })
 }
+
+/// LTC processing result. Processing never allocates; construction may allocate.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct LtcResult {
+    pub consumed: u64,
+    pub state: u8,
+    pub has_frame: bool,
+    pub frames: i64,
+    pub user_bits: u32,
+    pub binary_group_flags: u8,
+    pub color_frame: bool,
+    pub polarity_valid: bool,
+    pub start_sample: u64,
+    pub end_sample: u64,
+    pub start_ns: u64,
+    pub end_ns: u64,
+    pub has_observation: bool,
+    pub source_frames: i64,
+    pub discontinuity: bool,
+}
+impl From<protocol::ltc::DecodeResult> for LtcResult {
+    fn from(r: protocol::ltc::DecodeResult) -> Self {
+        let mut out = Self {
+            consumed: r.consumed as u64,
+            state: r.state as u8,
+            ..Default::default()
+        };
+        if let Some(f) = r.frame {
+            out.has_frame = true;
+            out.frames = f.position.frames;
+            out.user_bits = f.metadata.user_bits;
+            out.binary_group_flags = f.metadata.binary_group_flags;
+            out.color_frame = f.metadata.color_frame;
+            out.polarity_valid = f.polarity_valid;
+            out.start_sample = f.start_sample;
+            out.end_sample = f.end_sample;
+            out.start_ns = f.start_ns;
+            out.end_ns = f.end_ns;
+        }
+        if let Some(s) = r.observation {
+            out.has_observation = true;
+            out.source_frames = s.position.frames;
+            out.discontinuity = s.discontinuity;
+        }
+        out
+    }
+}
+fn ltc_config(
+    numerator: u32,
+    denominator: u32,
+    drop_frame: bool,
+    sample_rate: u32,
+) -> Result<protocol::ltc::LtcConfig> {
+    protocol::ltc::LtcConfig::new(
+        protocol::FrameFormat::new(numerator, denominator, drop_frame).map_err(error)?,
+        sample_rate,
+    )
+    .map_err(error)
+}
+pub struct LtcEncoder {
+    inner: protocol::ltc::LtcEncoder,
+}
+pub fn ltc_encoder_new(
+    numerator: u32,
+    denominator: u32,
+    drop_frame: bool,
+    sample_rate: u32,
+    frames: i64,
+) -> Result<LtcEncoder> {
+    Ok(LtcEncoder {
+        inner: protocol::ltc::LtcEncoder::new(
+            ltc_config(numerator, denominator, drop_frame, sample_rate)?,
+            protocol::Position::from_frames(frames),
+        ),
+    })
+}
+pub fn ltc_encoder_reset(value: &mut LtcEncoder, frames: i64) {
+    value.inner.reset(protocol::Position::from_frames(frames));
+}
+pub fn ltc_encoder_set_amplitude(value: &mut LtcEncoder, amplitude: f32) -> bool {
+    value.inner.set_amplitude(amplitude)
+}
+pub fn ltc_encoder_set_metadata(
+    value: &mut LtcEncoder,
+    user_bits: u32,
+    binary_group_flags: u8,
+    color_frame: bool,
+) {
+    value.inner.set_metadata(protocol::ltc::LtcMetadata {
+        user_bits,
+        binary_group_flags,
+        color_frame,
+    });
+}
+pub struct LtcDecoder {
+    inner: protocol::ltc::LtcDecoder,
+}
+pub fn ltc_decoder_new(
+    numerator: u32,
+    denominator: u32,
+    drop_frame: bool,
+    sample_rate: u32,
+) -> Result<LtcDecoder> {
+    Ok(LtcDecoder {
+        inner: protocol::ltc::LtcDecoder::new(ltc_config(
+            numerator,
+            denominator,
+            drop_frame,
+            sample_rate,
+        )?),
+    })
+}
+pub fn ltc_decoder_reset(value: &mut LtcDecoder) {
+    value.inner.reset();
+}
+pub fn ltc_decoder_process(
+    value: &mut LtcDecoder,
+    samples: &[f32],
+    first_sample: u64,
+    first_sample_ns: u64,
+) -> LtcResult {
+    value
+        .inner
+        .process(
+            samples,
+            protocol::ltc::SampleBlock {
+                first_sample,
+                first_sample_ns,
+            },
+        )
+        .into()
+}
+pub struct LtcInput {
+    inner: protocol::ltc::LtcInput,
+}
+pub fn ltc_input_new(
+    numerator: u32,
+    denominator: u32,
+    drop_frame: bool,
+    sample_rate: u32,
+) -> Result<LtcInput> {
+    Ok(LtcInput {
+        inner: protocol::ltc::LtcInput::new(ltc_config(
+            numerator,
+            denominator,
+            drop_frame,
+            sample_rate,
+        )?),
+    })
+}
+pub fn ltc_input_reset(value: &mut LtcInput, frames: i64) {
+    value.inner.reset(protocol::Position::from_frames(frames));
+}
+pub fn ltc_input_process(
+    value: &mut LtcInput,
+    samples: &[f32],
+    first_sample: u64,
+    first_sample_ns: u64,
+) -> LtcResult {
+    value
+        .inner
+        .process(
+            samples,
+            protocol::ltc::SampleBlock {
+                first_sample,
+                first_sample_ns,
+            },
+        )
+        .into()
+}
+pub struct LtcOutput {
+    inner: protocol::ltc::LtcOutput,
+}
+pub fn ltc_output_new(
+    numerator: u32,
+    denominator: u32,
+    drop_frame: bool,
+    sample_rate: u32,
+) -> Result<LtcOutput> {
+    Ok(LtcOutput {
+        inner: protocol::ltc::LtcOutput::new(ltc_config(
+            numerator,
+            denominator,
+            drop_frame,
+            sample_rate,
+        )?),
+    })
+}
+pub fn ltc_output_reset(value: &mut LtcOutput) {
+    value.inner.reset();
+}
+pub fn ltc_output_set_amplitude(value: &mut LtcOutput, amplitude: f32) -> bool {
+    value.inner.set_amplitude(amplitude)
+}
+pub fn ltc_output_set_metadata(
+    value: &mut LtcOutput,
+    user_bits: u32,
+    binary_group_flags: u8,
+    color_frame: bool,
+) {
+    value.inner.set_metadata(protocol::ltc::LtcMetadata {
+        user_bits,
+        binary_group_flags,
+        color_frame,
+    });
+}
+
+pub fn ltc_encoder_render(value: &mut LtcEncoder, samples: &mut [f32]) -> u8 {
+    value.inner.render(samples) as u8
+}
+pub fn ltc_output_render(
+    value: &mut LtcOutput,
+    snapshot: &TimecodeSnapshot,
+    samples: &mut [f32],
+    first_sample: u64,
+    first_sample_ns: u64,
+) -> u8 {
+    value.inner.render(
+        &snapshot.inner,
+        protocol::ltc::SampleBlock {
+            first_sample,
+            first_sample_ns,
+        },
+        samples,
+    ) as u8
+}
+pub fn ltc_output_mute(value: &mut LtcOutput, muted: bool) {
+    value.inner.mute(muted);
+}
+pub fn ltc_input_set_timeout_ns(value: &mut LtcInput, timeout_ns: u64) {
+    value.inner.set_timeout_ns(timeout_ns);
+}
+pub fn ltc_input_read(value: &LtcInput, now_ns: u64) -> Reading {
+    value.inner.read(now_ns).into()
+}
+pub fn ltc_input_state(value: &LtcInput, now_ns: u64) -> u8 {
+    value.inner.state(now_ns) as u8
+}
+pub fn ltc_input_capture_into(value: &LtcInput, snapshot: &mut TimecodeSnapshot, now_ns: u64) {
+    snapshot.inner = value.inner.snapshot(now_ns);
+}

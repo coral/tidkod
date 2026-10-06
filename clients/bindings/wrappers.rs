@@ -44,12 +44,14 @@ pub(super) fn scalar(t: &str, swift: bool) -> String {
         ("u64", true) => "UInt64",
         ("i32", true) => "Int32",
         ("i64", true) => "Int64",
+        ("f32", true) => "Float",
         ("f64", true) => "Double",
         ("u8", false) => "uint8_t",
         ("u32", false) => "uint32_t",
         ("u64", false) => "uint64_t",
         ("i32", false) => "int32_t",
         ("i64", false) => "int64_t",
+        ("f32", false) => "float",
         ("f64", false) => "double",
         _ => t,
     }
@@ -158,6 +160,8 @@ pub fn generate(
                 let typ = |ty: &str| match ty {
                     "String" | "&str" => "String".into(),
                     "Vec<u8>" | "&[u8]" => "[UInt8]".into(),
+                    "&[f32]" => "UnsafeBufferPointer<Float>".into(),
+                    "&mut[f32]" => "UnsafeMutableBufferPointer<Float>".into(),
                     _ => scalar(base(ty), true),
                 };
                 let decl = a_rest
@@ -213,6 +217,8 @@ pub fn generate(
                             "raw".into()
                         } else if opaque.contains(base(ty)) {
                             format!("`{}`.raw", camel(n))
+                        } else if ty == "&[f32]" || ty == "&mut[f32]" {
+                            format!("`{0}`.baseAddress ?? {1}<Float>(bitPattern: MemoryLayout<Float>.alignment)!, UInt(`{0}`.count)", camel(n), if ty=="&[f32]" {"UnsafePointer"}else{"UnsafeMutablePointer"})
                         } else if ty == "&[u8]" {
                             "buffer".into()
                         } else {
@@ -281,6 +287,7 @@ pub fn generate(
             );
         }
         s += "typedef struct { const uint8_t *data; size_t len; } TKBytes;\nstatic inline void tk_buffer_dispose(TKBuffer **value) { tidkod_buffer_free(*value); *value = NULL; }\nstatic inline TKBytes tk_buffer_view(const TKBuffer *value) { TKBytes bytes = {tidkod_buffer_data(value), tidkod_buffer_len(value)}; return bytes; }\n";
+        s += "typedef struct {const float *data; size_t len;} TKFloatInput;\ntypedef struct {float *data; size_t len;} TKFloatOutput;\n";
         let ty = |t: &str| {
             if opaque.contains(t) {
                 format!("TK{t}")
@@ -314,6 +321,10 @@ pub fn generate(
                         "{} {n}",
                         if t == "&str" {
                             "const char *".into()
+                        } else if t == "&[f32]" {
+                            "TKFloatInput".into()
+                        } else if t == "&mut[f32]" {
+                            "TKFloatOutput".into()
                         } else if t == "&[u8]" {
                             "TKBytes".into()
                         } else {
@@ -328,7 +339,7 @@ pub fn generate(
                 .map(|(n, t)| {
                     if t == "&str" {
                         format!("(const uint8_t*){n}, {n} ? strlen({n}) : 0")
-                    } else if t == "&[u8]" {
+                    } else if matches!(t.as_str(), "&[u8]" | "&[f32]" | "&mut[f32]") {
                         format!("{n}.data, {n}.len")
                     } else if opaque.contains(base(t)) {
                         format!("{n}.raw")
