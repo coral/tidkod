@@ -30,7 +30,12 @@ int main(void) {
             REQUIRE(frame.ltc.user5==5 && frame.ltc.user6==6 && frame.ltc.user7==7 && frame.ltc.user8==8);
             REQUIRE(frame.ltc.col_frame==1);
             REQUIRE(frame.ltc.dfbit==(unsigned)drop);
-            REQUIRE(ltc_frame_parse_bcg_flags(&frame.ltc,standard)==5);
+            REQUIRE(frame.ltc.binary_group_flag_bit1==0);
+            if(standard==LTC_TV_625_50) {
+                REQUIRE(frame.ltc.biphase_mark_phase_correction==1 && frame.ltc.binary_group_flag_bit0==1);
+            } else {
+                REQUIRE(frame.ltc.binary_group_flag_bit0==1 && frame.ltc.binary_group_flag_bit2==1);
+            }
             /* Allow reference-decoder edge timing/acquisition rounding. */
             uint64_t boundary=(uint64_t)count*sr*d/n;
             REQUIRE(llabs((long long)frame.off_start-(long long)boundary)<=3);
@@ -41,6 +46,8 @@ int main(void) {
         REQUIRE(count>=22);ltc_decoder_free(reference);
         // Independently generated, edge-shaped libltc audio -> Tidkod.
         LTCEncoder *reference_encoder=ltc_encoder_create(sr,(double)n/d,standard,0);REQUIRE(reference_encoder);
+        /* Copy API is available in Ubuntu 22.04's libltc as well as 1.3.2. */
+        unsigned char *bytes=malloc(sr);REQUIRE(bytes);
         SMPTETimecode tc={0};tc.hours=1;tc.mins=23;tc.secs=45;tc.frame=0;
         ltc_encoder_set_timecode(reference_encoder,&tc);
         LTCFrame codeword; ltc_encoder_get_frame(reference_encoder,&codeword);
@@ -62,8 +69,8 @@ int main(void) {
         int64_t base=(1*3600+23*60+45)*nominal-(drop?2*(83-83/10):0);
         int64_t previous=-1;
         for(unsigned f=0;f<35;f++) {
-            ltc_encoder_encode_frame(reference_encoder);unsigned char *bytes=NULL;
-            int length=ltc_encoder_get_bufferptr(reference_encoder,&bytes,1);REQUIRE(length>0 && length<(int)sr);
+            ltc_encoder_encode_frame(reference_encoder);
+            int length=ltc_encoder_get_buffer(reference_encoder,bytes);REQUIRE(length>0 && length<(int)sr);
             starts[f+1]=offset+(unsigned)length;
             for(int i=0;i<length;i++)pcm[i]=((float)bytes[i]-128.f)/128.f;
             size_t at=0;while(at<(size_t)length) {
@@ -92,7 +99,7 @@ int main(void) {
         }
         REQUIRE(count>=30);
         printf("%u/%u %s @ %u: bidirectional interoperability passed\n",n,d,drop?"DF":"NDF",sr);
-        ltc_encoder_free(reference_encoder);tidkod_ltcencoder_free(encoder);tidkod_ltcdecoder_free(decoder);free(pcm);
+        free(bytes);ltc_encoder_free(reference_encoder);tidkod_ltcencoder_free(encoder);tidkod_ltcdecoder_free(decoder);free(pcm);
     }
     return 0;
 }

@@ -63,7 +63,7 @@ examples and internal transport source.
 | --- | --- | --- | --- |
 | Windows MSVC | x64, ARM64 | Hosted Windows runners | C/C++ shared and static, C# DLL |
 | Linux GNU | x64, ARM64 | Ubuntu 22.04, glibc 2.35 | C/C++ shared and static; also run on Ubuntu 24.04 |
-| macOS | Intel, Apple Silicon | macOS 13 | C/C++ shared and static, Swift package and dylibs |
+| macOS | Apple Silicon | macOS 13 | C/C++ shared and static, Swift package and dylibs |
 | iOS | ARM64 device and ARM64 simulator | iOS 26 | Device build; Swift XCTest consumer on simulator |
 
 Each desktop target produces separate `native` and `core` SDKs. Native includes
@@ -82,6 +82,8 @@ modules require a compatible Swift toolchain; rebuild the provided sources or
 use the Swift package when integrating with another toolchain. The universal
 Apple ZIP combines both macOS architectures and iOS device/simulator slices in
 an XCFramework and includes a source Swift package. iOS uses static linking.
+The Intel macOS slice is cross-compiled on Apple Silicon; there are no Intel
+macOS runner jobs or standalone Intel macOS desktop archives.
 
 The baseline describes the deployment target, not a claim that every OS version
 has been tested. Hosted runner OS/toolchain details are recorded in CI logs.
@@ -127,7 +129,7 @@ by version tags. The web application is built/tested but is not a release asset.
 Rust CI is pinned to 1.98.1; macOS/iOS consumers use each runner's Xcode.
 
 A tag push validates the tag/version match, runs all checks, and uploads tested
-SDKs as Actions artifacts. The publication job requires exactly 12 desktop
+SDKs as Actions artifacts. The publication job requires exactly 10 desktop
 archives plus the Apple ZIP, validates their metadata and binary architectures,
 and creates `SHA256SUMS`. Names are:
 

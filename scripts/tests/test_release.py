@@ -86,8 +86,8 @@ class ReleaseTests(unittest.TestCase):
             fixtures(directory)
             assets = release.validate_assets(directory, "1.2.3")
             checksums = (directory / "SHA256SUMS").read_text().splitlines()
-            self.assertEqual(len(assets), 14)
-            self.assertEqual(len(checksums), 13)
+            self.assertEqual(len(assets), 12)
+            self.assertEqual(len(checksums), 11)
             for line in checksums:
                 digest, name = line.split("  ")
                 self.assertEqual(digest, hashlib.sha256((directory / name).read_bytes()).hexdigest())

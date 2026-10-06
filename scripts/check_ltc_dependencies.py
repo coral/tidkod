@@ -11,7 +11,7 @@ def check(target, native):
     metadata = json.loads(subprocess.check_output([
         'cargo', 'metadata', '--locked', '--format-version', '1', '--filter-platform', target,
         '--no-default-features', '--features', features,
-    ], text=True))
+    ], encoding='utf-8'))
     packages = {p['id']: p for p in metadata['packages']}
     nodes = {n['id']: n for n in metadata['resolve']['nodes']}
     root = next(p['id'] for p in packages.values() if p['name'] == 'tidkod-bindings')
@@ -37,6 +37,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target')
     args = parser.parse_args()
-    target = args.target or next(line.split(': ', 1)[1] for line in subprocess.check_output(['rustc', '-vV'], text=True).splitlines() if line.startswith('host: '))
+    target = args.target or next(line.split(': ', 1)[1] for line in subprocess.check_output(['rustc', '-vV'], encoding='utf-8').splitlines() if line.startswith('host: '))
     for native in [False, True]:
         check(target, native)
