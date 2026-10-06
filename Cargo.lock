@@ -3315,7 +3315,7 @@ dependencies = [
 
 [[package]]
 name = "tidkod"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "tidkod-bindings"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "cbindgen",
  "csbindgen",
@@ -3362,7 +3362,7 @@ dependencies = [
 
 [[package]]
 name = "tidkod-protocol"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "broadcast-common",
  "prost",
@@ -3374,11 +3374,11 @@ dependencies = [
 
 [[package]]
 name = "tidkod-sdk"
-version = "0.1.2"
+version = "0.2.0"
 
 [[package]]
 name = "tidkod-wasm"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "moq-native",
  "moq-net 0.2.22",

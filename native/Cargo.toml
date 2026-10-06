@@ -23,7 +23,7 @@ http = "1"
 url = "2"
 mio = { version = "1", features = ["net", "os-poll"] }
 web-transport-trait = "0.4"
-tidkod-protocol = { path = "../protocol", version = "0.1.2" }
+tidkod-protocol = { path = "../protocol", version = "0.2.0" }
 thiserror.workspace = true
 mdns-sd = "0.21.3"
 if-addrs = { version = "0.15", features = ["link-local"] }
