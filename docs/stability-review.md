@@ -6,7 +6,7 @@ to native and WASM clients. These are implemented changes, not proposed algorith
 
 | Failure reproduced | Change and regression coverage |
 | --- | --- |
-| A sustained latency increase or clock step remains rejected by the old fit | Quarantine consistent outliers; replace stale history after eight consistent observations spanning at least 500 ms. The steady 4 Hz latency-step test begins accepting the new path after 1.75 seconds. Isolated, alternating, and reordered outliers cannot establish a replacement. |
+| A sustained latency increase or clock step remains rejected by the old fit | Quarantine consistent outliers; replace stale history after eight consistent observations spanning at least 500 ms. The steady 4 Hz latency-step test begins accepting the new path after 1.75 seconds. (Later tightened for bufferbloat: elevated-delay regimes need a two-second run with a settled delay floor; see [protocol](protocol.md).) Isolated, alternating, and reordered outliers cannot establish a replacement. |
 | A 30-second leader stall appears fresh after subtracting leader processing time | Limit the complete probe exchange to 500 ms; check freshness in both probe matching and clock estimation. Invalid replies do not consume an otherwise valid outstanding request. |
 | Delay jitter over a short baseline produces a drift estimate | Require eight selected low-delay observations spanning two seconds before fitting drift. Prefer newer observations when delays tie. |
 | Old low-delay support makes uncertainty too optimistic | Age each sample's asymmetry bound independently and add regression residual. A changing-asymmetry regression previously had 4.101 ms error with 1.154 ms uncertainty; it now reports 4.304 ms uncertainty for the same error. |

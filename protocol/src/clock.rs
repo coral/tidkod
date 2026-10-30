@@ -212,24 +212,27 @@ impl ClockEstimator {
                 self.recovery.clear();
             }
             self.recovery.push_back(sample);
-            while self.recovery.len() > 16 {
+            while self.recovery.len() > 64 {
                 self.recovery.pop_front();
             }
-            if self.recovery.len() < 8
-                || local - self.recovery.front().unwrap().local < 500_000_000.
-            {
-                return false;
-            }
-            // A changed path settles at a new delay floor; a filling queue (bufferbloat)
-            // keeps raising it. Adopting a still-rising run would discard the low-delay
-            // history the queue returns to and follow its growing asymmetry.
+            let first = self.recovery.front().unwrap().local;
             let half = self.recovery.len() / 2;
             let floor = |run: &mut dyn Iterator<Item = &Sample>| {
                 run.map(|s| s.delay).fold(f64::INFINITY, f64::min)
             };
             let early = floor(&mut self.recovery.iter().take(half));
             let late = floor(&mut self.recovery.iter().skip(half));
-            if (late - early).abs() > SETTLED_FLOOR_NS {
+            // A clock step at the usual delay is adopted quickly. An elevated delay is either
+            // a changed path, which settles at a new floor, or a filling queue (bufferbloat),
+            // which keeps raising it. Adopting a still-rising run would discard the low-delay
+            // history the queue returns to and follow its growing asymmetry, so require a
+            // longer run whose floor has stopped moving; jitter hides a ramp over short spans.
+            let elevated = early.min(late) > min + 20_000_000.;
+            let required = if elevated { 2_000_000_000. } else { 500_000_000. };
+            if self.recovery.len() < 8
+                || local - first < required
+                || (elevated && (late - early).abs() > SETTLED_FLOOR_NS)
+            {
                 return false;
             }
             self.samples.clear();

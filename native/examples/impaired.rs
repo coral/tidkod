@@ -14,7 +14,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tidkod::{ConnectionState, Engine, FollowerConfig, LeaderConfig, Rate};
+use tidkod::{ConnectionState, Engine, Event, FollowerConfig, LeaderConfig, Rate};
 
 struct Random(u64);
 impl Random {
@@ -204,7 +204,15 @@ fn run(profile: Profile, warmup: Duration, duration: Duration) -> tidkod::Result
     let stop = Arc::new(AtomicBool::new(false));
     let relay = proxy(profile, leader.info().address, stop.clone());
     let engine = Engine::new()?;
-    let follower = engine.follower(FollowerConfig::direct(relay))?;
+    // --trace prints each clock exchange: elapsed s, path delay, exchange and fitted offset
+    // errors (ms), accepted.
+    let trace = std::env::args().any(|a| a == "--trace");
+    let follower = engine.follower(FollowerConfig {
+        clock_diagnostics: trace,
+        ..FollowerConfig::direct(relay)
+    })?;
+    let truth_offset = leader_engine.clock().ns_at(Instant::now()).unwrap() as f64
+        - engine.clock().ns_at(Instant::now()).unwrap() as f64;
     let mut reference = leader.reader()?;
     let mut reader = follower.reader()?;
     let (mut errors, mut signed) = (Vec::new(), Vec::new());
@@ -214,6 +222,21 @@ fn run(profile: Profile, warmup: Duration, duration: Duration) -> tidkod::Result
     let began = Instant::now();
     while began.elapsed() < warmup + duration {
         thread::sleep(Duration::from_millis(5));
+        while let Some(event) = follower.try_event() {
+            if let Event::ClockObservation(o) = event {
+                let e = o.exchange;
+                let delay = (e.t4 - e.t1) as f64 - (e.t3 - e.t2) as f64;
+                let offset = ((e.t2 as f64 - e.t1 as f64) + (e.t3 as f64 - e.t4 as f64)) / 2.;
+                eprintln!(
+                    "trace {:.2} {:.3} {:+.3} {:+.3} {}",
+                    began.elapsed().as_secs_f64(),
+                    delay / 1e6,
+                    (offset - truth_offset) / 1e6,
+                    (o.mapping.offset_at(e.t4) - truth_offset) / 1e6,
+                    o.accepted
+                );
+            }
+        }
         let instant = Instant::now();
         let truth = reference.read_at(leader_engine.clock().ns_at(instant).unwrap());
         let r = reader.read_at(engine.clock().ns_at(instant).unwrap());
