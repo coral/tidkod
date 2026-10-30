@@ -76,6 +76,8 @@ try {
     const reply = new Promise(resolve => calls.set(id, resolve));
     socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
     const message = await Promise.race([reply, pause(5000).then(() => { throw Error('Chrome evaluation timed out'); })]);
+    // Cross-origin isolation swaps the page into a new process; until it commits there is no context.
+    if (message.error?.message === 'Cannot find default execution context') return undefined;
     if (message.error || message.result.exceptionDetails) throw Error(JSON.stringify(message));
     return message.result.result.value;
   }
@@ -84,7 +86,7 @@ try {
   for (;;) {
     const elapsed = (Date.now() - began) / 1000;
     if (elapsed > warmup + seconds + 60) throw Error('Browser accuracy run timed out');
-    const status = await evaluate('({ result: window.accuracyResult, error: window.accuracyError })');
+    const status = await evaluate('({ result: window.accuracyResult, error: window.accuracyError })') ?? {};
     if (status.error) throw Error(status.error);
     if (status.result) {
       console.log(JSON.stringify({ ...status.result, tracked: process.argv.includes('--tracked'),

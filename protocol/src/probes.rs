@@ -41,6 +41,10 @@ impl Probes {
         Ok(bytes)
     }
     /// Call immediately after synchronous publication returns, in the same clock domain.
+    /// When publication includes the socket send, the matched exchange measures from this
+    /// instant: a send call can block until the datagram departs (for example behind a
+    /// network content filter), and that local time is not path delay. The wire t1 remains
+    /// only the request identifier.
     pub fn publication_finished(&mut self, now: u64) {
         let i = self.sequence as usize % 128;
         if self.outstanding[i].0 == self.sequence && self.sequence != 0 {
@@ -66,8 +70,14 @@ impl Probes {
         }
         *slot = (0, 0);
         self.last_publication = self.publication[p.sequence as usize % 128];
+        let sent = self.last_publication.map_or(p.t1, |d| p.t1 + d);
         Ok(Some(Exchange {
-            t1: p.t1,
+            // Never let a late publication timestamp produce a negative path delay.
+            t1: if sent <= now && p.t3 - p.t2 <= now - sent {
+                sent
+            } else {
+                p.t1
+            },
             t2: p.t2,
             t3: p.t3,
             t4: now,

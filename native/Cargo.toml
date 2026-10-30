@@ -43,6 +43,12 @@ path = "examples/tracked.rs"
 name = "accuracy"
 path = "examples/accuracy.rs"
 [[example]]
+name = "asymmetry"
+path = "examples/asymmetry.rs"
+[[example]]
+name = "impaired"
+path = "examples/impaired.rs"
+[[example]]
 name = "ltc_in"
 path = "examples/ltc_in.rs"
 [[example]]

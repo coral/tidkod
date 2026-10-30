@@ -697,6 +697,11 @@ impl Endpoint {
                 None | Some(DatagramEvent::Response(_)) => {}
             }
         }
+        self.drive(now)
+    }
+    /// Run connection transmit/event work and flush queued UDP without receiving. Owners call
+    /// this after queueing latency-sensitive datagrams instead of waiting for the next pass.
+    pub fn drive(&mut self, now: Instant) -> io::Result<()> {
         let mut ids = std::mem::take(&mut self.order);
         ids.clear();
         ids.extend(self.connections.keys().copied());

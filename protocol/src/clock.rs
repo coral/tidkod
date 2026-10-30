@@ -5,6 +5,13 @@ pub const MAX_EXCHANGE_NS: u64 = 500_000_000;
 const HISTORY_NS: f64 = 32_000_000_000.;
 // Covers relative oscillator changes within ±500 ppm and a fitted drift within that range.
 const HOLDOVER_GROWTH: f64 = 0.001;
+/// Largest delay-floor change between halves of a recovery run that still counts as settled.
+const SETTLED_FLOOR_NS: f64 = 2_000_000.;
+/// Timestamp floor for delay weighting.
+const WEIGHT_FLOOR_NS: f64 = 50_000.;
+/// The delay spread of this many lowest-delay samples sets the weighting scale, so that
+/// roughly this many observations always carry the fit.
+const WEIGHT_SUPPORT: usize = 4;
 /// Four monotonic nanosecond timestamps in the NTP convention.
 #[derive(Clone, Copy, Debug)]
 pub struct Exchange {
@@ -52,9 +59,10 @@ impl OffsetEvidence {
 pub struct ClockObservation {
     pub exchange: Exchange,
     pub accepted: bool,
-    /// Time from t1 until publication returned; excludes hidden transport queues.
+    /// Time from the request's wire t1 until publication returned. Native publication
+    /// includes the socket send; when consistent, `exchange.t1` is this departure instant.
     pub publication_ns: Option<u64>,
-    /// Local receipt-to-processing-entry delay; t4 remains the original receipt timestamp.
+    /// Local receipt-to-processing-entry delay; t4 remains the application receive timestamp.
     pub processing_delay_ns: u64,
     pub mapping: ClockMapping,
 }
@@ -212,6 +220,18 @@ impl ClockEstimator {
             {
                 return false;
             }
+            // A changed path settles at a new delay floor; a filling queue (bufferbloat)
+            // keeps raising it. Adopting a still-rising run would discard the low-delay
+            // history the queue returns to and follow its growing asymmetry.
+            let half = self.recovery.len() / 2;
+            let floor = |run: &mut dyn Iterator<Item = &Sample>| {
+                run.map(|s| s.delay).fold(f64::INFINITY, f64::min)
+            };
+            let early = floor(&mut self.recovery.iter().take(half));
+            let late = floor(&mut self.recovery.iter().skip(half));
+            if (late - early).abs() > SETTLED_FLOOR_NS {
+                return false;
+            }
             self.samples.clear();
             self.samples.append(&mut self.recovery);
             accepted_observations = self.samples.len() as u64;
@@ -224,8 +244,14 @@ impl ClockEstimator {
             };
             self.samples.push_back(sample);
         }
+        // At the fast cadence 128 samples span only 6.4 s. Beyond the newest 64, evict the
+        // highest-delay sample instead of the oldest, so rare low-delay observations (a queue
+        // that drains between bursts) survive for the whole history window.
         while self.samples.len() > 128 {
-            self.samples.pop_front();
+            let worst = (0..self.samples.len() - 64)
+                .max_by(|a, b| self.samples[*a].delay.total_cmp(&self.samples[*b].delay))
+                .unwrap();
+            self.samples.remove(worst);
         }
         let mut selected: Vec<_> = self.samples.iter().copied().collect();
         selected.sort_by(|a, b| {
@@ -234,16 +260,30 @@ impl ClockEstimator {
                 .then_with(|| b.local.total_cmp(&a.local))
         });
         selected.truncate((selected.len() / 2).max(4).min(selected.len()));
-        let count = selected.len() as f64;
-        let x = selected.iter().map(|s| s.local - local).sum::<f64>() / count;
-        let y = selected.iter().map(|s| s.offset).sum::<f64>() / count;
+        // Extra delay above the path minimum bounds a sample's possible queueing asymmetry
+        // by half that excess. Weight accordingly, floored by timestamp resolution, so one
+        // queued direction cannot bias the fit the way an unweighted lower half does.
+        let floor = selected[0].delay;
+        let scale = ((selected[(WEIGHT_SUPPORT - 1).min(selected.len() - 1)].delay - floor) / 2.)
+            .max(WEIGHT_FLOOR_NS);
+        let weight = |s: &Sample| {
+            let excess = (s.delay - floor) / 2.;
+            1. / (scale * scale + excess * excess)
+        };
+        let total = selected.iter().map(weight).sum::<f64>();
+        let x = selected
+            .iter()
+            .map(|s| weight(s) * (s.local - local))
+            .sum::<f64>()
+            / total;
+        let y = selected.iter().map(|s| weight(s) * s.offset).sum::<f64>() / total;
         let xx = selected
             .iter()
-            .map(|s| (s.local - local - x).powi(2))
+            .map(|s| weight(s) * (s.local - local - x).powi(2))
             .sum::<f64>();
         let xy = selected
             .iter()
-            .map(|s| (s.local - local - x) * (s.offset - y))
+            .map(|s| weight(s) * (s.local - local - x) * (s.offset - y))
             .sum::<f64>();
         let span = self.samples.back().unwrap().local - self.samples.front().unwrap().local;
         let support_start = selected
@@ -255,12 +295,18 @@ impl ClockEstimator {
             .map(|s| s.local)
             .fold(f64::NEG_INFINITY, f64::max);
         // Use the time span of observations actually used by the fit, not discarded samples.
-        let drift =
-            if selected.len() >= 8 && support_end - support_start >= 2_000_000_000. && xx > 0. {
-                (xy / xx).clamp(-0.0005, 0.0005)
-            } else {
-                self.mapping.drift
-            };
+        // A slope beyond the ±500 ppm oscillator bound is not drift: delay that ramps with
+        // time (a filling queue) moves offsets the same way. Keep the previous drift instead
+        // of extrapolating a clamped artifact.
+        let drift = if selected.len() >= 8
+            && support_end - support_start >= 2_000_000_000.
+            && xx > 0.
+            && (xy / xx).abs() <= 0.0005
+        {
+            xy / xx
+        } else {
+            self.mapping.drift
+        };
         let offset = y - drift * x;
         let residual = selected
             .iter()

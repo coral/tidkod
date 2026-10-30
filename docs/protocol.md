@@ -61,7 +61,7 @@ A follower drops revisions not greater than its current revision for that sessio
 
 ## Clock estimation and correction
 
-The follower records t1 immediately before probe publication. The leader records t2 immediately on datagram receipt and t3 immediately before reply publication. The follower records t4 immediately on reply receipt, before queueing the exchange for estimation. Application and transport scheduling remain part of the measured path.
+The follower records t1 immediately before probe publication and sends it as the request identifier. For estimation, it uses the local time at which publication returned, provided that keeps the path delay nonnegative. Natively, publication includes the socket send. The leader records t2 immediately on datagram receipt and t3 immediately before reply publication. The follower records t4 immediately on reply receipt, before queueing the exchange for estimation. Application and transport scheduling remain part of the measured path. Only the follower's own send time is local and observable; it is excluded.
 
 The four-timestamp model is:
 
@@ -83,7 +83,22 @@ The first accepted clock measurement establishes the initial mapping immediately
 
 ## Source tracking and health
 
-Generated leaders default to paused. Tracked leaders consume timestamped source samples with optional rational rate hints and explicit discontinuity hints. Timestamps must increase and must not be in the future. Without a hint, estimate speed from consecutive position/time differences; samples spaced less than 1 ms do not supply a rate estimate. Three consistent changed-speed estimates or three position errors exceeding one frame in the same direction trigger a discontinuity. Alternating position errors do not confirm a jump, and a discontinuity clears prior confirmation evidence. Rate and explicit discontinuity hints apply immediately; exact rational rate hints are respected even for very slow shuttle rates. Routine position jitter uses a bounded correction of 20% of error capped to ±0.1 frame per sample.
+Generated leaders default to paused. Tracked leaders consume timestamped source samples with optional rational rate hints and explicit discontinuity hints. Timestamps must increase and must not be in the future. The tracker keeps up to 64 samples from the last second since the latest discontinuity. A gap longer than 500 ms discards that rate evidence.
+
+Speed without a hint:
+- Changed-speed candidates come from the longest available baseline in that window, not from consecutive samples. Baselines under 1 ms do not supply an estimate.
+- Three consistent candidates more than 2% from the current rate trigger a discontinuity.
+- Once the window spans at least 100 ms, an unhinted rate is refined continuously from a least-squares fit, with no discontinuity. It is represented at about 1 ppm resolution, or proportionally coarser above 1x.
+
+Jumps and hints:
+- Three position errors exceeding one frame in the same direction trigger a discontinuity.
+- Alternating position errors do not confirm a jump, and a discontinuity clears prior confirmation evidence.
+- Rate and explicit discontinuity hints apply immediately. Exact rational rate hints are respected even for very slow shuttle rates.
+
+Routine position:
+- Each routine position comes from that fit evaluated at the sample timestamp.
+- A single robust pass drops samples whose residual exceeds six median absolute residuals, with a 10 µs floor.
+- Until the window spans 100 ms, routine jitter uses a bounded correction of 20% of error, capped to ±0.1 frame per sample.
 
 Tracked publications coalesce to at most 10 Hz for routine samples; explicit changes and health transitions publish immediately. Generated heartbeats default to 1 Hz. If no external sample arrives within 500 ms, source health becomes degraded and the last signed trajectory continues indefinitely. Source kind remains `Tracked`, independent of health and connectivity. A subsequent sample restores health.
 

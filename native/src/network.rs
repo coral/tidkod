@@ -75,6 +75,15 @@ impl Io {
         self.web.step(cx, Instant::now());
         Ok(())
     }
+    /// Send newly queued probe datagrams in this pass. Probe timestamps are taken in the
+    /// application; every pass between them and the socket adds unobservable path asymmetry.
+    fn flush(&mut self, cx: &mut Context<'_>) -> Result<()> {
+        // Restore transport budgets that earlier work in this pass may have exhausted.
+        self.endpoint.drive(Instant::now())?;
+        self.runtime.step(cx, &mut self.park);
+        self.endpoint.drive(Instant::now())?;
+        Ok(())
+    }
     fn deadline(&self) -> Option<Instant> {
         [
             self.endpoint.next_deadline(),
@@ -475,6 +484,7 @@ impl LeaderJob {
                 Err(e) => emit(&self.events, Event::Error(e.to_string())),
             }
         }
+        let mut replied = false;
         self.peers.retain_mut(|peer| {
             let result = (|| -> Result<()> {
                 if publish {
@@ -509,6 +519,7 @@ impl LeaderJob {
                     peer.datagrams
                         .append_datagram(timestamp, encode(&p)?)
                         .map_err(transport)?;
+                    replied = true;
                 }
                 Ok(())
             })();
@@ -519,6 +530,9 @@ impl LeaderJob {
                 true
             }
         });
+        if replied {
+            self.io.flush(cx)?;
+        }
         self.readers
             .publish(leader_view(self.timeline, self.clock.now_ns()));
         Ok(())
@@ -796,6 +810,7 @@ impl FollowerJob {
                 peer.datagrams
                     .append_datagram(timestamp, payload)
                     .map_err(transport)?;
+                self.io.flush(cx)?;
                 self.probes.publication_finished(self.clock.now_ns());
                 if self.config.clock_diagnostics {
                     emit(

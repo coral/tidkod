@@ -68,8 +68,15 @@ try {
   const referenceChange = Math.abs(final.offset - calibration.offset);
   if (referenceChange > calibration.uncertainty + final.uncertainty + .05) throw Error(`Independent reference changed by ${referenceChange}ms`);
   const browser = statistics(browserErrors), native = statistics(nativeErrors);
+  // Smallest observed performance.now() increment: ~0.1 ms coarsened, ~0.005 ms isolated.
+  let timerStepMs = Infinity;
+  for (let previous = performance.now(), end = previous + 5; previous < end;) {
+    const next = performance.now();
+    if (next > previous) timerStepMs = Math.min(timerStepMs, next - previous);
+    previous = next;
+  }
   window.accuracyResult = { coreBuildId: core_build_id(), browser, native, clock: statistics(clockErrors), calibration, finalCalibration: final,
-    correctionMaxMs, generationChanges, userAgent: navigator.userAgent, warmupSeconds: warmup / 1000, seconds: duration / 1000,
+    correctionMaxMs, generationChanges, crossOriginIsolated, timerStepMs, userAgent: navigator.userAgent, warmupSeconds: warmup / 1000, seconds: duration / 1000,
     // Include reference uncertainty, rather than allowing it to hide an excursion.
     passed: browser.p99AbsMs + calibration.uncertainty <= 1 && browser.maxAbsMs + calibration.uncertainty <= 2
       && native.p99AbsMs <= 1 && native.maxAbsMs <= 2 };

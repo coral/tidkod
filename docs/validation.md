@@ -267,3 +267,145 @@ checked with actionlint. Windows consumers and the remaining desktop architectur
 combinations still require their GitHub matrix runs; local checks do not claim
 those have passed. Registry publishing remains disabled pending the release
 validation and packaging checks in `docs/releasing.md`.
+
+## Synchronization accuracy work, 2026-10-30
+
+### Deterministic impairment matrix
+
+`cargo run --release -p tidkod-protocol --example impairment` drives the shared
+`FollowerCore` (estimator, correction and probe cadence) against a ground-truth leader
+clock. It runs 300 simulated seconds per scenario, three seeds each, and evaluates
+every 10 ms after a 10-second warmup. `protocol/tests/impairment.rs` runs the same matrix
+with loose regression bounds.
+
+Scenarios:
+- wired queueing;
+- loaded wired;
+- an unobservable 150 µs stack asymmetry;
+- the earlier uniform 1–5 ms LAN model;
+- Wi-Fi with heavy tails and burst loss;
+- uplink-only Wi-Fi queueing;
+- Wi-Fi power save at the leader;
+- browser timer quantization with scheduling jitter, coarsened and isolated;
+- a 1 ppm/s drift ramp;
+- a symmetric 5 ms latency step;
+- burst loss.
+
+Every scenario reported an alignment error that covered the actual error at every
+evaluation (0% uncovered). None had a hard resync after acquisition.
+
+The estimator previously fitted an unweighted line through the lower half of samples by
+delay. It now weights that half by the possible queueing asymmetry `(delay − min)/2`.
+The weighting scale is set by the delay spread of the four lowest-delay samples, with a
+50 µs floor. Before: core `0.2.0/d8f32b574bc04c83`; after: the final working tree.
+
+| Scenario | Signed median before → after | p99 before → after | Max before → after |
+| --- | ---: | ---: | ---: |
+| wired | +0.000 ms → +0.000 ms | 0.005 ms → 0.005 ms | 0.008 ms → 0.007 ms |
+| wired-loaded | -0.000 ms → +0.000 ms | 0.059 ms → 0.034 ms | 0.074 ms → 0.053 ms |
+| wired-stack-asymmetry | +0.075 ms → +0.075 ms | 0.080 ms → 0.080 ms | 0.083 ms → 0.082 ms |
+| lan-uniform | +0.004 ms → -0.000 ms | 0.497 ms → 0.392 ms | 0.668 ms → 0.602 ms |
+| wifi | +0.000 ms → +0.007 ms | 0.334 ms → 0.192 ms | 0.434 ms → 0.266 ms |
+| wifi-uplink-queue | +0.195 ms → +0.047 ms | 0.325 ms → 0.132 ms | 0.373 ms → 0.181 ms |
+| wifi-leader-power-save | -0.054 ms → -0.015 ms | 0.349 ms → 0.189 ms | 0.474 ms → 0.290 ms |
+| browser | +0.006 ms → +0.019 ms | 0.054 ms → 0.051 ms | 0.070 ms → 0.061 ms |
+| browser-isolated | — → -0.007 ms | — → 0.043 ms | — → 0.055 ms |
+| wired-drift-ramp | -0.059 ms → -0.059 ms | 0.072 ms → 0.072 ms | 0.078 ms → 0.078 ms |
+| wired-latency-step | +0.000 ms → +0.000 ms | 0.005 ms → 0.006 ms | 0.008 ms → 0.082 ms |
+| wired-burst-loss | +0.000 ms → +0.000 ms | 0.005 ms → 0.005 ms | 0.007 ms → 0.007 ms |
+
+The stack-asymmetry row is the documented four-timestamp limit; no estimator removes it.
+The latency-step maximum rose because of exchanges in flight across the step. They saw
+the old delay on one leg and the new delay on the other, a genuine asymmetry. Once the old
+low-delay samples expire, those exchanges are the lowest-delay samples left and get more
+weight. The resulting transient is under 0.1 ms; p99 is unchanged.
+The drift-ramp row is fit lag over the 32-second window. A separate drift horizon,
+evaluated as an option, would have increased that lag, and wired noise was already about
+5 µs, so it was not adopted. Burst and chained-burst probing were also simulated at equal
+and triple traffic. They did not improve Wi-Fi or power-save p99 and worsened browser p99,
+so cadence is unchanged. With a 100 µs timer, the lowest-delay samples are partly rounding
+luck, which adds about +0.01 ms median; cross-origin isolation removes it.
+
+### Hint-less tracked sources
+
+`protocol/tests/tracking_cadence.rs` replays tracked sources without rate hints:
+- 10–240 Hz, uniform timestamp jitter up to 1 ms (4 ms in the characterization sweep);
+- ±30% irregular intervals and 2% dropped samples;
+- rates 1x, 1.0004x, 0.97x and −1x;
+- 1.5-second gaps.
+
+The previous tracker inferred speed from consecutive samples, quantized it to 1e-4, and
+turned any confirmed change into a discontinuity:
+- 240 Hz with 200 µs jitter: 130 false discontinuities per minute.
+- 60 Hz with 1 ms jitter: 30.
+- 60 Hz with 200 µs jitter settled on a rate 2,400 ppm off (inferred 1.0024x);
+  240 Hz with 1 ms jitter settled about 19,800 ppm off.
+
+After the change there are no discontinuities after initial rate acquisition up to 1 ms
+jitter. Tracking error p99 at sample instants falls from roughly the jitter amplitude to
+0.035–0.41 ms, depending on cadence. Rate error stays within tens to a few hundred ppm,
+resolved to about 1 ppm.
+
+A hinted 20 Hz source with 1% of timestamps displaced by up to ±500 µs went from 56.6 µs
+to 9.5 µs p99 trajectory error, through robust rejection; the old tracker measured 43.8 µs.
+
+### Native timestamp placement
+
+`cargo run --release -p tidkod --example asymmetry` splits loopback exchanges into true up and
+down legs. Both engines share one host clock, so the true offset is exact. On the development
+Mac, which runs the Little Snitch network extension, a UDP `sendmsg` took 0.1–1.4 ms. The probe
+left near the end of that call, but t1 was taken before encoding. The follower→leader leg
+therefore included the whole send. Measured each exchange ran 160 µs median ahead and the
+fitted offset 100–128 µs ahead, while send latency was high. A plain-`std` UDP benchmark
+reproduced the send cost outside Tidkod and outside the sandbox. Raising the worker thread
+to user-interactive QoS changed nothing, idle or with all 16 cores loaded, so it was not
+adopted.
+
+Two changes:
+- Native publication now drives the MoQ runtime and the QUIC endpoint through `sendmsg` in
+  the same worker pass (`Io::flush`), for both requests and replies.
+- `Probes` uses the local publication-return time as the exchange's t1, provided the path
+  delay stays nonnegative.
+
+Fitted offset error A/B in alternating runs:
+
+| t1 placement | Run 1 median | Run 2 median |
+| --- | ---: | ---: |
+| Before send | +42.6 µs | +32.9 µs |
+| After send | +4.1 µs | +6.1 µs |
+
+Paired 15 s warmup / 60 s same-instant `accuracy --tracked` runs, two followers, run back to
+back with an untouched HEAD build:
+
+| Build | Timeline signed median | Timeline p99 | Timeline max | Clock p99 |
+| --- | ---: | ---: | ---: | ---: |
+| HEAD `6a308bb`, run 1 | +0.040 / +0.038 ms | 0.054 / 0.051 ms | 0.059 / 0.055 ms | 0.054 / 0.053 ms |
+| Working tree, run 1 | −0.002 / −0.003 ms | 0.018 / 0.010 ms | 0.020 / 0.011 ms | 0.017 / 0.008 ms |
+| HEAD `6a308bb`, run 2 | +0.038 / +0.038 ms | 0.054 / 0.053 ms | 0.059 / 0.058 ms | 0.054 / 0.053 ms |
+| Working tree, run 2 | −0.005 / −0.001 ms | 0.009 / 0.008 ms | 0.010 / 0.009 ms | 0.007 / 0.007 ms |
+
+Earlier in the session, when filtered sends were slower, HEAD showed +0.10 ms bias. The
+magnitude of this bias depends on the host's send path. These are loopback results on one
+machine, not physical LAN or Wi-Fi measurements.
+
+The leader's t3 is still taken before its send, because the reply carries it. On a host
+where the leader's sends are slow, that remains as negative bias. Removing it needs a
+two-step or interleaved transmit timestamp, which is a protocol change.
+
+### Browser
+
+`web/vite.config.ts` serves `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` in dev and preview. Production hosts must
+send the same headers. Browser accuracy results now record `crossOriginIsolated` and the
+observed `performance.now()` step: 0.005 ms isolated and 0.100 ms otherwise in headless
+Chromium 156. WebTransport connects under COEP. The runner tolerates the execution-context
+swap that COOP causes.
+
+60-second `measure:browser --tracked` runs:
+- isolated: signed median +0.031 to +0.040 ms, p99 0.047–0.060 ms;
+- not isolated: +0.012 to +0.044 ms, p99 0.031–0.067 ms.
+
+The independent reference uncertainty is ±0.05–0.13 ms, so these runs cannot separate the
+two configurations; the simulated effect is about 0.01 ms. The remaining browser bias is
+consistent with the native finding. Its t1 still precedes the asynchronous `@moq/net` send,
+which the page cannot observe without changing that dependency.

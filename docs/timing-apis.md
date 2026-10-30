@@ -141,10 +141,25 @@ The existing clock uncertainty and estimator behavior remain separate.
 ## Timestamp placement and diagnostics
 
 Native and browser transports prepare the MoQ presentation timestamp before sampling t1/t3,
-then encode and publish. Receive timestamps are taken immediately after the application's
-receive operation returns, before parsing. The original t4 is retained through native queues.
+then encode and publish. The request carries that t1 as its identifier. After publication
+returns, `Probes::publication_finished` records the local time, and the matched exchange
+uses it as the follower's departure time. Native publication drives the MoQ runtime and
+the QUIC endpoint through `sendmsg` in the same worker pass, so this time follows the
+socket send. The browser's publication is only an in-memory MoQ append, so its departure
+time stays within microseconds of t1. A send call can block until the datagram departs:
+on a macOS host with a network content filter, sends took 0.1–1.4 ms. Before-send t1
+therefore counted local send time as outbound delay, and loopback showed a +30–130 µs
+offset bias. That bias is now within about ±10 µs. A late departure time is never
+allowed to make the path delay negative. The leader also flushes replies in the pass
+that creates them, but t3 is still taken before its send, since the reply carries it.
+
+Receive timestamps are taken when the application dequeues the datagram from MoQ, before
+parsing. Natively, this follows UDP receive, QUIC decryption and MoQ routing in the same
+worker pass; it is not a socket arrival time.
 No MoQ presentation timestamp is used as a receive timestamp: the published `moq-net 0.2.22`
 datagram API provides presentation time and payload, not a kernel/hardware arrival timestamp.
+`cargo run --release -p tidkod --example asymmetry` decomposes loopback exchanges into true
+up/down legs. The engines share a host clock, so this works only on one machine.
 
 `ClockObservation` records the four timestamps, accepted/rejected result, resulting mapping,
 interval evidence, optional t1-to-publication-return duration, and receipt-to-processing-entry
